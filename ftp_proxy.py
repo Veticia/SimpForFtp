@@ -172,6 +172,8 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
     def handle_file_request(self, ftp, path):
         filename = os.path.basename(path)
         mimetype, _ = mimetypes.guess_type(filename)
+        if mimetype is None:
+            mimetype = 'application/octet-stream'
         filesize = ftp.size(path)  # Get the size of the file
         self.send_response(200)
         if mimetype == 'application/octet-stream':
