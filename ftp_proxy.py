@@ -10,6 +10,10 @@ from datetime import datetime
 import mimetypes
 
 
+class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+    pass
+
+
 class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/':
@@ -49,13 +53,20 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
                 else:
                     ftp.login(username, password)
 
+                trailing_slash = False
                 if path.endswith('/'):
+                    trailing_slash = True
                     path = path[:-1]  # Remove trailing slash if present
 
                 # Check if the requested path is a file or a directory
                 try:
                     ftp.cwd(path)  # Try to change the working directory to the requested path
                     is_directory = True
+                    if not trailing_slash:
+                        self.send_response(301)
+                        self.send_header('Location', f'./{os.path.basename(path)}/')
+                        self.end_headers()
+                        return
                 except ftplib.error_perm:
                     is_directory = False
 
@@ -72,102 +83,110 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
                 self.wfile.write('Error: {}'.format(str(e)).encode())
 
     def handle_directory_request(self, ftp, path, address, username, password, sort_order):
-        # Check if the server supports the MLSD command
-        if 'MLSD' in ftp.sendcmd('FEAT'):
-            listing = []
-            for entry in ftp.mlsd(path):
-                name = entry[0]
-                facts = entry[1]
-                if name in ['.', '..']:
-                    continue
-                item_type = 'directory' if facts['type'] == 'dir' else 'file'
-                item_size = int(facts['size']) if 'size' in facts else None
-                item_date = facts['modify'] if 'modify' in facts else ''
-                item_path = f"{path}/{name}"
-                listing.append({
-                    'type': item_type,
-                    'name': name,
-                    'size': item_size,
-                    'date': item_date,
-                    'path': item_path
-                })
-        else:
-            parser = ftpparser.FTPParser()
-            data = []
-            ftp.dir(data.append)
-            results = parser.parse(data)
-            listing = []
-            for result in results:
-                name, size, timestamp, isdirectory, downloadable, islink, permissions = result
-                if name in ['.', '..']:
-                    continue
-                item_type = 'directory' if isdirectory else 'file'
-                item_size = size
-                item_date = timestamp
-                item_path = f"{path}/{name}"
-                listing.append({
-                    'type': item_type,
-                    'name': name,
-                    'size': item_size,
-                    'date': item_date,
-                    'path': item_path
-                })
+        try:
+            # Check if the server supports the MLSD command
+            if 'MLSD' in ftp.sendcmd('FEAT'):
+                listing = []
+                for entry in ftp.mlsd(path):
+                    name = entry[0]
+                    facts = entry[1]
+                    if name in ['.', '..']:
+                        continue
+                    item_type = 'directory' if facts['type'] == 'dir' else 'file'
+                    item_size = int(facts['size']) if 'size' in facts else None
+                    item_date = facts['modify'] if 'modify' in facts else ''
+                    item_path = f"{path}/{name}"
+                    listing.append({
+                        'type': item_type,
+                        'name': name,
+                        'size': item_size,
+                        'date': item_date,
+                        'path': item_path
+                    })
+            else:
+                parser = ftpparser.FTPParser()
+                data = []
+                ftp.dir(data.append)
+                results = parser.parse(data)
+                listing = []
+                for result in results:
+                    name, size, timestamp, isdirectory, downloadable, islink, permissions = result
+                    if name in ['.', '..']:
+                        continue
+                    item_type = 'directory' if isdirectory else 'file'
+                    item_size = size
+                    item_date = timestamp
+                    item_path = f"{path}/{name}"
+                    listing.append({
+                        'type': item_type,
+                        'name': name,
+                        'size': item_size,
+                        'date': item_date,
+                        'path': item_path
+                    })
 
-        name_link = generate_new_url(username, password, address, path)
-        size_link = '?SIZE_DESC'
-        date_link = '?DATE_DESC'
-        ext_link = '?EXT_ASC'
+            name_link = '.'
+            size_link = '?SIZE_DESC'
+            date_link = '?DATE_DESC'
+            ext_link = '?EXT_ASC'
 
-        # Sort the listing by name (case-insensitive) with directories first
-        if sort_order == 'NAME_ASC':
-            name_link = '?NAME_DESC'
-            listing.sort(key=lambda row: (row['type'] != 'directory', row['name'].lower()))
-        elif sort_order == 'NAME_DESC':
-            listing.sort(key=lambda row: (row['type'] != 'directory', row['name'].lower()), reverse=True)
-        elif sort_order == 'SIZE_ASC':
-            listing.sort(key=lambda row: (row['type'] != 'directory', row['size']))
-        elif sort_order == 'SIZE_DESC':
-            size_link = '?SIZE_ASC'
-            listing.sort(key=lambda row: (row['type'] != 'directory', row['size']), reverse=True)
-        elif sort_order == 'DATE_ASC':
-            listing.sort(key=lambda row: (row['type'] != 'directory', row['date']))
-        elif sort_order == 'DATE_DESC':
-            date_link = '?DATE_ASC'
-            listing.sort(key=lambda row: (row['type'] != 'directory', row['date']), reverse=True)
-        elif sort_order == 'EXT_ASC':
-            ext_link = '?EXT_DESC'
-            listing.sort(key=lambda row: (row['type'] != 'directory', os.path.splitext(row['name'])[1]))
-        elif sort_order == 'EXT_DESC':
-            listing.sort(key=lambda row: (row['type'] != 'directory', os.path.splitext(row['name'])[1]), reverse=True)
-        else:
-            # Default sort order
-            name_link = '?NAME_DESC'
-            listing.sort(key=lambda row: (row['type'] != 'directory', row['name'].lower()))
+            # Sort the listing by name (case-insensitive) with directories first
+            if sort_order == 'NAME_ASC':
+                name_link = '?NAME_DESC'
+                listing.sort(key=lambda row: (row['type'] != 'directory', row['name'].lower()))
+            elif sort_order == 'NAME_DESC':
+                listing.sort(key=lambda row: (row['type'] != 'directory', row['name'].lower()), reverse=True)
+            elif sort_order == 'SIZE_ASC':
+                listing.sort(key=lambda row: (row['type'] != 'directory', row['size']))
+            elif sort_order == 'SIZE_DESC':
+                size_link = '?SIZE_ASC'
+                listing.sort(key=lambda row: (row['type'] != 'directory', row['size']), reverse=True)
+            elif sort_order == 'DATE_ASC':
+                listing.sort(key=lambda row: (row['type'] != 'directory', row['date']))
+            elif sort_order == 'DATE_DESC':
+                date_link = '?DATE_ASC'
+                listing.sort(key=lambda row: (row['type'] != 'directory', row['date']), reverse=True)
+            elif sort_order == 'EXT_ASC':
+                ext_link = '?EXT_DESC'
+                listing.sort(key=lambda row: (row['type'] != 'directory', os.path.splitext(row['name'])[1]))
+            elif sort_order == 'EXT_DESC':
+                listing.sort(key=lambda row: (row['type'] != 'directory', os.path.splitext(row['name'])[1]),
+                             reverse=True)
+            else:
+                # Default sort order
+                name_link = '?NAME_DESC'
+                listing.sort(key=lambda row: (row['type'] != 'directory', row['name'].lower()))
 
-        self.send_response(200)
-        self.send_header('Content-type', 'text/html')
-        self.end_headers()
-        self.wfile.write('<html><head><title>FTP Proxy</title></head><body>'.encode())
-        self.wfile.write('<table>'.encode())
-        self.wfile.write(
-            f'<tr><th><a href="{name_link}">Name</a></th><th><a href="{ext_link}">File type</a></th><th><a href="{size_link}">Size</a></th><th><a href="{date_link}">Date</a></th></tr>'.encode())
-        if path != '':
-            parent_path = os.path.dirname(path)
-            parent_url = f'/proxy/{address}{parent_path}'.rstrip('/')
-            self.wfile.write(f'<tr><td><a href="{parent_url}">..</a></td><td></td><td></td></tr>'.encode())
-
-        for item in listing:
-            size = ''
-            file_type = html.escape('<dir>')
-            if item['type'] == 'file':
-                size = format_size(item["size"])
-                file_type = os.path.splitext(item["name"])[1].lstrip('.')
-            date = datetime.fromtimestamp(item['date']).strftime('%Y-%m-%d %H:%M') if item['date'] else ''
-            new_url = generate_new_url(username, password, address, item["path"])
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            self.wfile.write('<html><head><title>FTP Proxy</title></head><body>'.encode())
+            self.wfile.write((path_to_html_links(address + path).encode()))
+            self.wfile.write('<table>'.encode())
             self.wfile.write(
-                f'<tr><td><a href="{new_url}">{item["name"]}</a></td><td>{file_type}</td><td>{size}</td><td>{date}</td></tr>'.encode())
+                f'<tr><th><a href="{name_link}">Name</a></th><th><a href="{ext_link}">File type</a></th><th><a href="{size_link}">Size</a></th><th><a href="{date_link}">Date</a></th></tr>'.encode())
+            if path != '':
+                self.wfile.write(f'<tr><td><a href="..">..</a></td><td></td><td></td></tr>'.encode())
 
-        self.wfile.write('</table></body></html>'.encode())
+            for item in listing:
+                size = ''
+                file_type = html.escape('<dir>')
+                if item['type'] == 'file':
+                    size = format_size(item["size"])
+                    file_type = os.path.splitext(item["name"])[1].lstrip('.')
+                date = datetime.fromtimestamp(item['date']).strftime('%Y-%m-%d %H:%M') if item['date'] else ''
+                new_url = generate_new_url(item["path"], item['type'], sort_order)
+                self.wfile.write(
+                    f'<tr><td><a href="{new_url}">{item["name"]}</a></td><td>{file_type}</td><td>{size}</td><td>{date}</td></tr>'.encode())
+
+            self.wfile.write('</table></body></html>'.encode())
+        except (BrokenPipeError, ConnectionResetError) as e:
+            ftp.close()
+            self.send_response(500)
+            self.send_header('Content-type', 'text/plain')
+            self.end_headers()
+            self.wfile.write('Error: {}'.format(str(e)).encode())
+            # raise
 
     def handle_file_request(self, ftp, path):
         filename = os.path.basename(path)
@@ -175,19 +194,57 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
         if mimetype is None:
             mimetype = 'application/octet-stream'
         filesize = ftp.size(path)  # Get the size of the file
+
+        # Check if FTP server supports partial file downloads
+        ftp_features = ftp.sendcmd('FEAT')
+        if 'REST STREAM' in ftp_features:
+            range_header = self.headers.get('Range')
+            if range_header:
+                start, end = range_header.replace('bytes=', '').split('-')
+                start = int(start)
+                end = int(end) if end else filesize - 1
+                self.send_response(206)  # Partial content
+                self.send_header('Content-Range', f'bytes {start}-{end}/{filesize}')
+                self.send_header('Accept-Ranges', 'bytes')  # Server allows downloading from the middle of a file
+                if mimetype == 'application/octet-stream':
+                    self.send_header('Content-type', 'application/octet-stream')
+                    self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
+                else:
+                    self.send_header('Content-type', mimetype)
+                self.end_headers()
+
+                def callback(data):
+                    try:
+                        self.wfile.write(data)
+                    except (BrokenPipeError, ConnectionResetError):
+                        ftp.close()
+                        # raise
+
+                ftp.retrbinary(f'RETR {path}', callback, rest=start)
+                return
+
+        # Full file download
         self.send_response(200)
+        if 'REST STREAM' in ftp_features:
+            self.send_header('Accept-Ranges', 'bytes')  # Server allows downloading from the middle of a file
+        else:
+            self.send_header('Accept-Ranges', 'none')  # Server doesn't allow downloading from the middle of a file
         if mimetype == 'application/octet-stream':
             self.send_header('Content-type', 'application/octet-stream')
             self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
         else:
             self.send_header('Content-type', mimetype)
-        self.send_header('Accept-Ranges',
-                         'none')  # Server doesn't allow downloading from the middle of a file
         self.send_header('Content-Length', filesize)  # Send the size of the file
         self.end_headers()
 
-        ftp.retrbinary(f'RETR {path}', lambda data: self.wfile.write(data),
-                       rest=None)  # Server doesn't allow retries
+        def callback(data):
+            try:
+                self.wfile.write(data)
+            except (BrokenPipeError, ConnectionResetError):
+                ftp.close()
+                # raise
+
+        ftp.retrbinary(f'RETR {path}', callback, rest=0)
 
 
 def format_size(size):
@@ -198,21 +255,33 @@ def format_size(size):
     return f"{size:.1f} TB"
 
 
-def generate_new_url(self, password, address, path) -> str:
-    username = self
-    if username and password:
-        new_url = f'/proxy/{username}:{password}@{address}{path}'
-    elif username:
-        new_url = f'/proxy/{username}@{address}{path}'
+def generate_new_url(path, file_type, sort_order) -> str:
+    if sort_order == 'NAME_ASC':
+        sort_order = ''
     else:
-        new_url = f'/proxy/{address}{path}'
+        sort_order = '?' + sort_order
+    if file_type == 'directory':
+        new_url = os.path.basename(path) + '/' + sort_order
+    else:
+        new_url = os.path.basename(path)
     return new_url
+
+
+def path_to_html_links(path: str) -> str:
+    parts = path.split('/')
+    links = []
+    for i in range(len(parts)):
+        if i == len(parts) - 1:
+            links.append(f'{parts[i]}')
+        else:
+            links.append(f'<a href="{"../" * (len(parts) - i - 1)}">{parts[i]}</a>')
+    return ' / '.join(links)
 
 
 def main():
     PORT = 8000
 
-    with socketserver.TCPServer(("", PORT), FTPProxyHandler) as httpd:
+    with ThreadedTCPServer(('', PORT), FTPProxyHandler) as httpd:
         print("Server started on port", PORT)
         httpd.serve_forever()
 
