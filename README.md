@@ -1,2 +1,2 @@
 # SimpForFtp
-Simple web based proxy for FTP servers
+**Simp**le web based proxy **for** **FTP** servers
