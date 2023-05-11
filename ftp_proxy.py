@@ -9,17 +9,16 @@ import ftpparser
 from datetime import datetime
 import mimetypes
 
+PORT = 8000
+
+VERSION = "0.7.0"
 
 INDEX_PAGE = """
 <!DOCTYPE html>
 <html>
 <head>
     <title>FTP Proxy</title>
-    <style>
-        label {{
-            display: block;
-        }}
-    </style>
+    {styles}
 </head>
     <body>
         <h1>FTP Proxy</h1>
@@ -39,8 +38,36 @@ INDEX_PAGE = """
         </label>
         <button type="submit">Connect</button>
     </form>
+    {footer}
 </body>
 </html>
+"""
+
+FOOTER = f"""
+<hr>
+<footer>
+  <small>
+    <a href="https://github.com/Veticia/SimpForFtp">SimpForFtp</a> {VERSION}
+    by <a href="https://github.com/Veticia/SimpForFtp/blob/main/LICENSE">Veticia</a>
+  </small>
+</footer>
+"""
+
+STYLES = """
+<style>
+    label {
+        display: block;
+    }
+
+    footer {
+        margin-top: 20px;
+    }
+  
+    hr {
+        border: none;
+        border-top: 1px solid #ccc;
+    }
+</style>
 """
 
 
@@ -85,7 +112,7 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-type', 'text/html')
             self.end_headers()
-            page_content = INDEX_PAGE.format(error_message=error_message)
+            page_content = INDEX_PAGE.format(error_message=error_message, footer=FOOTER, version=VERSION, styles=STYLES)
             self.wfile.write(page_content.encode())
         elif self.path.startswith('/proxy/'):
             parsed_url = urllib.parse.urlparse(self.path)
@@ -230,9 +257,9 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-type', 'text/html')
             self.end_headers()
-            self.wfile.write('<html><head><title>FTP Proxy</title></head><body>'.encode())
+            self.wfile.write(f'<html><head><title>FTP Proxy</title>{STYLES}</head><body>'.encode())
             self.wfile.write((path_to_html_links(address + path).encode()))
-            self.wfile.write('<table>'.encode())
+            self.wfile.write('<hr><table>'.encode())
             self.wfile.write(
                 f'<tr><th><a href="{name_link}">Name</a></th><th><a href="{ext_link}">File type</a></th><th><a href="{size_link}">Size</a></th><th><a href="{date_link}">Date</a></th></tr>'.encode())
             if path != '':
@@ -249,7 +276,7 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
                 self.wfile.write(
                     f'<tr><td><a href="{new_url}">{item["name"]}</a></td><td>{file_type}</td><td>{size}</td><td>{date}</td></tr>'.encode())
 
-            self.wfile.write('</table></body></html>'.encode())
+            self.wfile.write(f'</table>{FOOTER}</body></html>'.encode())
         except (BrokenPipeError, ConnectionResetError) as e:
             ftp.close()
             self.send_response(500)
@@ -349,8 +376,6 @@ def path_to_html_links(path: str) -> str:
 
 
 def main():
-    PORT = 8000
-
     with ThreadedTCPServer(('', PORT), FTPProxyHandler) as httpd:
         print("Server started on port", PORT)
         httpd.serve_forever()
