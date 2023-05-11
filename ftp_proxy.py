@@ -10,17 +10,83 @@ from datetime import datetime
 import mimetypes
 
 
+INDEX_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>FTP Proxy</title>
+    <style>
+        label {{
+            display: block;
+        }}
+    </style>
+</head>
+    <body>
+        <h1>FTP Proxy</h1>
+        <p style="color: red;">{error_message}</p>
+        <form action="/" method="get">
+        <label>
+            FTP Address:
+            <input type="text" name="address" required placeholder="ftp.example.com">
+        </label>
+        <label>
+            Username:
+            <input type="text" name="username" placeholder="leave blank for anonymous">
+        </label>
+        <label>
+            Password:
+            <input type="password" name="password">
+        </label>
+        <button type="submit">Connect</button>
+    </form>
+</body>
+</html>
+"""
+
+
 class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     pass
 
 
 class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path == '/':
+        parsed_url = urllib.parse.urlparse(self.path)
+        query_params = urllib.parse.parse_qs(parsed_url.query)
+        address = query_params.get('address', [''])[0]
+        username = query_params.get('username', [''])[0]
+        password = query_params.get('password', [''])[0]
+
+        if parsed_url.path == '/':
+            # Check if login credentials were provided
+            if address:
+                # Test connection to FTP server
+                try:
+                    ftp = ftplib.FTP(address)
+                    ftp.login(username, password)
+                    ftp.quit()
+                    # If connection is successful, redirect user to proxy path
+                    if username and password:
+                        proxy_path = f'/proxy/{username}:{password}@{address}/'
+                    elif username:
+                        proxy_path = f'/proxy/{username}@{address}/'
+                    else:
+                        proxy_path = f'/proxy/{address}/'
+                    self.send_response(302)
+                    self.send_header('Location', proxy_path)
+                    self.end_headers()
+                    return
+                except ftplib.all_errors:
+                    # If connection fails, display an error message
+                    error_message = f'Error: Could not connect to FTP server at {address} with username {username}'
+            else:
+                error_message = ''
+
+            # Display login form with error message (if any)
             self.send_response(200)
             self.send_header('Content-type', 'text/html')
             self.end_headers()
-            self.wfile.write(INDEX_PAGE.encode())
+            page_content = INDEX_PAGE.format(error_message=error_message)
+            self.wfile.write(page_content.encode())
         elif self.path.startswith('/proxy/'):
             parsed_url = urllib.parse.urlparse(self.path)
 
@@ -75,12 +141,16 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
                     self.handle_directory_request(ftp, path, address, username, password, sort_order)
                 else:
                     self.handle_file_request(ftp, path)
+                ftp.close()
 
-            except ftplib.all_errors as e:
-                self.send_response(500)
-                self.send_header('Content-type', 'text/plain')
+
+            except ftplib.all_errors:
+                # If connection fails, redirect user back to index page
+                self.send_response(302)
+                self.send_header('Location', '/')
                 self.end_headers()
-                self.wfile.write('Error: {}'.format(str(e)).encode())
+                return
+        return
 
     def handle_directory_request(self, ftp, path, address, username, password, sort_order):
         try:
@@ -256,7 +326,7 @@ def format_size(size):
 
 
 def generate_new_url(path, file_type, sort_order) -> str:
-    if sort_order == 'NAME_ASC':
+    if sort_order == 'NAME_ASC' or sort_order == '':
         sort_order = ''
     else:
         sort_order = '?' + sort_order
