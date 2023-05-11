@@ -11,7 +11,7 @@ import mimetypes
 
 PORT = 8000
 
-VERSION = "0.7.0"
+VERSION = "0.7.1"
 
 INDEX_PAGE = """
 <!DOCTYPE html>
