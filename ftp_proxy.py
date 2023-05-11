@@ -38,6 +38,7 @@ INDEX_PAGE = """
         </label>
         <button type="submit">Connect</button>
     </form>
+    {demo}
     {footer}
 </body>
 </html>
@@ -70,6 +71,16 @@ STYLES = """
 </style>
 """
 
+DEMO = ""
+
+if os.path.exists("demo"):
+    DEMO = """
+<div style="border: 1px solid blue; background-color: #E0FFFF; color: black; padding: 10px; margin: 10px;">
+    <div style="float: left; width: 30px;">&#x2139;</div>
+    <div style="margin-left: 30px;">This is a fully featured demo instance of <a href="">SimpForFtp</a> proxy.<br>
+    For heavy use please consider running your own instance so I can keep this one free for everyone.</div>
+</div>
+"""
 
 class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     pass
@@ -112,7 +123,7 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-type', 'text/html')
             self.end_headers()
-            page_content = INDEX_PAGE.format(error_message=error_message, footer=FOOTER, version=VERSION, styles=STYLES)
+            page_content = INDEX_PAGE.format(error_message=error_message, footer=FOOTER, version=VERSION, styles=STYLES, demo=DEMO)
             self.wfile.write(page_content.encode())
         elif self.path.startswith('/proxy/'):
             parsed_url = urllib.parse.urlparse(self.path)
