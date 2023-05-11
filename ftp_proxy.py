@@ -82,11 +82,21 @@ if os.path.exists("demo"):
 </div>
 """
 
+
 class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     pass
 
 
 class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
+    def __init__(self, *args, **kwargs):
+        self.suppress_body = False
+        super().__init__(*args, **kwargs)
+
+    def do_HEAD(self):
+        self.suppress_body = True
+        self.do_GET()
+        self.suppress_body = False
+
     def do_GET(self):
         parsed_url = urllib.parse.urlparse(self.path)
         query_params = urllib.parse.parse_qs(parsed_url.query)
@@ -123,7 +133,8 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-type', 'text/html')
             self.end_headers()
-            page_content = INDEX_PAGE.format(error_message=error_message, footer=FOOTER, version=VERSION, styles=STYLES, demo=DEMO)
+            page_content = INDEX_PAGE.format(error_message=error_message, footer=FOOTER, version=VERSION, styles=STYLES,
+                                             demo=DEMO)
             self.wfile.write(page_content.encode())
         elif self.path.startswith('/proxy/'):
             parsed_url = urllib.parse.urlparse(self.path)
@@ -268,6 +279,8 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-type', 'text/html')
             self.end_headers()
+            if self.suppress_body:
+                return
             self.wfile.write(f'<html><head><title>FTP Proxy</title>{STYLES}</head><body>'.encode())
             self.wfile.write((path_to_html_links(address + path).encode()))
             self.wfile.write('<hr><table>'.encode())
@@ -321,14 +334,15 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
                     self.send_header('Content-type', mimetype)
                 self.end_headers()
 
-                def callback(data):
-                    try:
-                        self.wfile.write(data)
-                    except (BrokenPipeError, ConnectionResetError):
-                        ftp.close()
-                        # raise
+                if not self.suppress_body:
+                    def callback(data):
+                        try:
+                            self.wfile.write(data)
+                        except (BrokenPipeError, ConnectionResetError):
+                            ftp.close()
+                            # raise
 
-                ftp.retrbinary(f'RETR {path}', callback, rest=start)
+                    ftp.retrbinary(f'RETR {path}', callback)
                 return
 
         # Full file download
