@@ -12,7 +12,7 @@ import mimetypes
 
 PORT = 8000
 
-VERSION = "0.8.6"
+VERSION = "0.8.7"
 
 INDEX_PAGE = """
 <!DOCTYPE html>
@@ -325,6 +325,14 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
             # raise
 
     def handle_file_request(self, ftp, path):
+        # Check if the requested file exists on the FTP server
+        try:
+            filesize = ftp.size(path)
+        except ftplib.error_perm as e:
+            # If the file does not exist, or we have no access, return a 404 Not Found response
+            self.send_error(404, f'File not found: {path}')
+            return
+
         # Try to retrieve the last modification time using the MDTM command
         last_modified = None
         if 'MLSD' in ftp.sendcmd('FEAT'):
@@ -360,7 +368,6 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
         mimetype, _ = mimetypes.guess_type(filename)
         if mimetype is None:
             mimetype = 'application/octet-stream'
-        filesize = ftp.size(path)  # Get the size of the file
 
         # Check if FTP server supports partial file downloads
         range_header = self.headers.get('Range')
