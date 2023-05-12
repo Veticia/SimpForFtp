@@ -364,7 +364,7 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
 
         # Check if FTP server supports partial file downloads
         ftp_features = ftp.sendcmd('FEAT')
-        if 'REST STREAM' in ftp_features:
+        if 'REST STREAM' in ftp_features and False:
             range_header = self.headers.get('Range')
             if range_header:
                 start, end = range_header.replace('bytes=', '').split('-')
