@@ -12,7 +12,7 @@ import mimetypes
 
 PORT = 8000
 
-VERSION = "0.8.0"
+VERSION = "0.8.1"
 
 INDEX_PAGE = """
 <!DOCTYPE html>
@@ -68,6 +68,19 @@ STYLES = """
     hr {
         border: none;
         border-top: 1px solid #ccc;
+    }
+    tr {
+        vertical-align: top;
+        white-space: nowrap;
+    }
+    tr td a {
+        white-space: normal;
+        text-indent: -2em;
+        margin-left: 2em;
+        display: block;
+    }
+    tr td a:first-line {
+        text-indent: 0;
     }
 </style>
 """
