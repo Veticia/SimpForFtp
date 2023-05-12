@@ -203,7 +203,7 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
 
                 if is_directory:
                     sort_order = parsed_url.query
-                    self.handle_directory_request(ftp, path, address, username, password, sort_order)
+                    self.handle_directory_request(ftp, path, address, sort_order)
                 else:
                     self.handle_file_request(ftp, path)
                 ftp.close()
@@ -216,7 +216,7 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
                 return
         return
 
-    def handle_directory_request(self, ftp, path, address, username, password, sort_order):
+    def handle_directory_request(self, ftp, path, address, sort_order):
         try:
             # Check if the server supports the MLSD command
             if 'MLSD' in ftp.sendcmd('FEAT'):
@@ -322,7 +322,7 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
             self.send_header('Content-type', 'text/plain')
             self.end_headers()
             self.wfile.write('Error: {}'.format(str(e)).encode())
-            # raise
+            return
 
     def handle_file_request(self, ftp, path):
         # Check if the requested file exists on the FTP server
@@ -406,7 +406,6 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
                         self.wfile.write(ftp_data)
                     except (BrokenPipeError, ConnectionResetError):
                         ftp.close()
-                        # raise
 
                 ftp.retrbinary(f'RETR {path}', callback, rest=start)
             return
@@ -434,7 +433,6 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
                 self.wfile.write(ftp_data)
             except (BrokenPipeError, ConnectionResetError):
                 ftp.close()
-                # raise
 
         ftp.retrbinary(f'RETR {path}', callback, rest=0)
 
