@@ -12,7 +12,7 @@ import mimetypes
 
 PORT = 8000
 
-VERSION = "0.8.1"
+VERSION = "0.8.2"
 
 INDEX_PAGE = """
 <!DOCTYPE html>
@@ -182,7 +182,7 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
                     ftp.login(username, password)
 
                 trailing_slash = False
-                if path.endswith('/') and self.path.endswith('/'):
+                if path.endswith('/') and parsed_url.path.endswith('/'):
                     trailing_slash = True
                     path = path[:-1]  # Remove trailing slash if present
 
@@ -193,7 +193,7 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
                     if not trailing_slash:
                         self.send_response(302)
                         if path:
-                            self.send_header('Location', f'{self.path}/')
+                            self.send_header('Location', f'{parsed_url.path}/')
                         else:
                             self.send_header('Location', f'./{os.path.basename(path)}/')
                         self.end_headers()
