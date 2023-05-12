@@ -179,7 +179,7 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
                     ftp.cwd(path)  # Try to change the working directory to the requested path
                     is_directory = True
                     if not trailing_slash:
-                        self.send_response(301)
+                        self.send_response(302)
                         self.send_header('Location', f'./{os.path.basename(path)}/')
                         self.end_headers()
                         return
