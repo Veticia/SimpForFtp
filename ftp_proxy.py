@@ -1,3 +1,4 @@
+import email.utils
 import html
 import http.server
 import socketserver
@@ -192,7 +193,6 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
                     self.handle_file_request(ftp, path)
                 ftp.close()
 
-
             except ftplib.all_errors:
                 # If connection fails, redirect user back to index page
                 self.send_response(302)
@@ -310,6 +310,37 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
             # raise
 
     def handle_file_request(self, ftp, path):
+        # Try to retrieve the last modification time using the MDTM command
+        last_modified = None
+        if 'MLSD' in ftp.sendcmd('FEAT'):
+            try:
+                last_modified = ftp.sendcmd(f'MDTM {path}')
+            except ftplib.error_perm:
+                pass
+        # Fallback to using the LIST command if MDTM is not supported or returns an error
+        if last_modified is None:
+            try:
+                data = []
+                ftp.dir(path, data.append)
+                parser = ftpparser.FTPParser()
+                results = parser.parse(data)
+                result = results[0]
+                name, size, timestamp, isdirectory, downloadable, islink, permissions = result
+                last_modified = timestamp
+            except (ftplib.error_perm, IndexError):
+                pass
+
+        # Check if an If-Modified-Since header is present
+        if_modified_since = self.headers.get('If-Modified-Since')
+        if if_modified_since and last_modified:
+            # Compare the last modification time with the If-Modified-Since header value
+            if_modified_since_time = int(email.utils.parsedate_to_datetime(if_modified_since).timestamp())
+            if last_modified <= if_modified_since_time:
+                self.send_response(304)  # Not Modified
+                self.end_headers()
+                return
+
+        # Cached file is stale, redownloading.
         filename = os.path.basename(path)
         mimetype, _ = mimetypes.guess_type(filename)
         if mimetype is None:
@@ -332,6 +363,10 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
                     self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
                 else:
                     self.send_header('Content-type', mimetype)
+                if last_modified:
+                    self.send_header('Last-Modified', email.utils.formatdate(
+                        last_modified,
+                        usegmt=True))
                 self.end_headers()
 
                 if not self.suppress_body:
@@ -356,6 +391,10 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
             self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
         else:
             self.send_header('Content-type', mimetype)
+        if last_modified:
+            self.send_header('Last-Modified', email.utils.formatdate(
+                last_modified,
+                usegmt=True))
         self.send_header('Content-Length', filesize)  # Send the size of the file
         self.end_headers()
 
