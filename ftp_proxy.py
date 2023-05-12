@@ -12,7 +12,7 @@ import mimetypes
 
 PORT = 8000
 
-VERSION = "0.8.5"
+VERSION = "0.8.6"
 
 INDEX_PAGE = """
 <!DOCTYPE html>
@@ -369,7 +369,17 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
             start, end = range_header.replace('bytes=', '').split('-')
             start = int(start)
             end = int(end) if end else filesize - 1
-            self.send_response(206)  # Partial content
+
+            # Check if the requested range is valid
+            if start >= filesize:
+                # If the start value exceeds the filesize, return a 416 Range Not Satisfiable response
+                self.send_response(416)
+                self.send_header('Content-Range', f'bytes */{filesize}')
+                self.end_headers()
+                return
+
+            # If the requested range is valid, send a 206 Partial Content response
+            self.send_response(206)
             self.send_header('Content-Range', f'bytes {start}-{end}/{filesize}')
             self.send_header('Accept-Ranges', 'bytes')  # Server allows downloading from the middle of a file
             if mimetype == 'application/octet-stream':
