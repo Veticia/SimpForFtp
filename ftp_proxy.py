@@ -169,7 +169,7 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
                     ftp.login(username, password)
 
                 trailing_slash = False
-                if path.endswith('/'):
+                if path.endswith('/') and self.path.endswith('/'):
                     trailing_slash = True
                     path = path[:-1]  # Remove trailing slash if present
 
@@ -179,7 +179,10 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
                     is_directory = True
                     if not trailing_slash:
                         self.send_response(302)
-                        self.send_header('Location', f'./{os.path.basename(path)}/')
+                        if path:
+                            self.send_header('Location', f'{self.path}/')
+                        else:
+                            self.send_header('Location', f'./{os.path.basename(path)}/')
                         self.end_headers()
                         return
                 except ftplib.error_perm:
