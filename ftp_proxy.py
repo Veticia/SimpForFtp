@@ -96,7 +96,6 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
     def do_HEAD(self):
         self.suppress_body = True
         self.do_GET()
-        self.suppress_body = False
 
     def do_GET(self):
         parsed_url = urllib.parse.urlparse(self.path)
