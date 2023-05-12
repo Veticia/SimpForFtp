@@ -12,7 +12,7 @@ import mimetypes
 
 PORT = 8000
 
-VERSION = "0.8.3"
+VERSION = "0.8.4"
 
 INDEX_PAGE = """
 <!DOCTYPE html>
@@ -397,7 +397,7 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
 
         # Full file download
         self.send_response(200)
-        if 'REST STREAM' in ftp_features:
+        if 'REST STREAM' in ftp_features and False:
             self.send_header('Accept-Ranges', 'bytes')  # Server allows downloading from the middle of a file
         else:
             self.send_header('Accept-Ranges', 'none')  # Server doesn't allow downloading from the middle of a file
