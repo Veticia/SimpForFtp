@@ -12,7 +12,7 @@ import mimetypes
 
 PORT = 8000
 
-VERSION = "0.8.4"
+VERSION = "0.8.5"
 
 INDEX_PAGE = """
 <!DOCTYPE html>
@@ -363,41 +363,40 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
         filesize = ftp.size(path)  # Get the size of the file
 
         # Check if FTP server supports partial file downloads
+        range_header = self.headers.get('Range')
         ftp_features = ftp.sendcmd('FEAT')
-        if 'REST STREAM' in ftp_features and False:
-            range_header = self.headers.get('Range')
-            if range_header:
-                start, end = range_header.replace('bytes=', '').split('-')
-                start = int(start)
-                end = int(end) if end else filesize - 1
-                self.send_response(206)  # Partial content
-                self.send_header('Content-Range', f'bytes {start}-{end}/{filesize}')
-                self.send_header('Accept-Ranges', 'bytes')  # Server allows downloading from the middle of a file
-                if mimetype == 'application/octet-stream':
-                    self.send_header('Content-type', 'application/octet-stream')
-                    self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
-                else:
-                    self.send_header('Content-type', mimetype)
-                if last_modified:
-                    self.send_header('Last-Modified', email.utils.formatdate(
-                        last_modified,
-                        usegmt=True))
-                self.end_headers()
+        if range_header and 'REST STREAM' in ftp_features:
+            start, end = range_header.replace('bytes=', '').split('-')
+            start = int(start)
+            end = int(end) if end else filesize - 1
+            self.send_response(206)  # Partial content
+            self.send_header('Content-Range', f'bytes {start}-{end}/{filesize}')
+            self.send_header('Accept-Ranges', 'bytes')  # Server allows downloading from the middle of a file
+            if mimetype == 'application/octet-stream':
+                self.send_header('Content-type', 'application/octet-stream')
+                self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
+            else:
+                self.send_header('Content-type', mimetype)
+            if last_modified:
+                self.send_header('Last-Modified', email.utils.formatdate(
+                    last_modified,
+                    usegmt=True))
+            self.end_headers()
 
-                if not self.suppress_body:
-                    def callback(data):
-                        try:
-                            self.wfile.write(data)
-                        except (BrokenPipeError, ConnectionResetError):
-                            ftp.close()
-                            # raise
+            if not self.suppress_body:
+                def callback(ftp_data):
+                    try:
+                        self.wfile.write(ftp_data)
+                    except (BrokenPipeError, ConnectionResetError):
+                        ftp.close()
+                        # raise
 
-                    ftp.retrbinary(f'RETR {path}', callback)
-                return
+                ftp.retrbinary(f'RETR {path}', callback, rest=start)
+            return
 
         # Full file download
         self.send_response(200)
-        if 'REST STREAM' in ftp_features and False:
+        if 'REST STREAM' in ftp_features:
             self.send_header('Accept-Ranges', 'bytes')  # Server allows downloading from the middle of a file
         else:
             self.send_header('Accept-Ranges', 'none')  # Server doesn't allow downloading from the middle of a file
@@ -413,9 +412,9 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
         self.send_header('Content-Length', filesize)  # Send the size of the file
         self.end_headers()
 
-        def callback(data):
+        def callback(ftp_data):
             try:
-                self.wfile.write(data)
+                self.wfile.write(ftp_data)
             except (BrokenPipeError, ConnectionResetError):
                 ftp.close()
                 # raise
