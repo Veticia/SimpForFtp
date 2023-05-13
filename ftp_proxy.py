@@ -9,13 +9,13 @@ from urllib.parse import unquote
 import ftpparser
 from datetime import datetime
 import mimetypes
+import time
 
 PORT = 8000
 
-VERSION = "0.8.7"
+VERSION = "0.8.8"
 
-INDEX_PAGE = """
-<!DOCTYPE html>
+INDEX_PAGE = """<!DOCTYPE html>
 <html>
 <head>
     <title>FTP Proxy</title>
@@ -98,7 +98,7 @@ if os.path.exists("demo"):
 
 
 class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
-    pass
+    allow_reuse_address = True
 
 
 class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
@@ -145,9 +145,10 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
             # Display login form with error message (if any)
             self.send_response(200)
             self.send_header('Content-type', 'text/html')
-            self.end_headers()
             page_content = INDEX_PAGE.format(error_message=error_message, footer=FOOTER, version=VERSION, styles=STYLES,
                                              demo=DEMO)
+            self.send_header('Content-Length', str(len(page_content.encode())))
+            self.end_headers()
             self.wfile.write(page_content.encode())
         elif self.path.startswith('/proxy/'):
             parsed_url = urllib.parse.urlparse(self.path)
@@ -293,16 +294,12 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
 
             self.send_response(200)
             self.send_header('Content-type', 'text/html')
-            self.end_headers()
-            if self.suppress_body:
-                return
-            self.wfile.write(f'<html><head><title>FTP Proxy</title>{STYLES}</head><body>'.encode())
-            self.wfile.write((path_to_html_links(address + path).encode()))
-            self.wfile.write('<hr><table>'.encode())
-            self.wfile.write(
-                f'<tr><th><a href="{name_link}">Name</a></th><th><a href="{ext_link}">File type</a></th><th><a href="{size_link}">Size</a></th><th><a href="{date_link}">Date</a></th></tr>'.encode())
+            page_content = f'<!DOCTYPE html><html><head><title>FTP Proxy</title>{STYLES}</head><body>'
+            page_content += path_to_html_links(address + path)
+            page_content += '<hr><table>'
+            page_content += f'<tr><th><a href="{name_link}">Name</a></th><th><a href="{ext_link}">File type</a></th><th><a href="{size_link}">Size</a></th><th><a href="{date_link}">Date</a></th></tr>'
             if path != '':
-                self.wfile.write(f'<tr><td><a href="..">..</a></td><td></td><td></td></tr>'.encode())
+                page_content += f'<tr><td><a href="..">..</a></td><td></td><td></td></tr>'
 
             for item in listing:
                 size = ''
@@ -312,19 +309,34 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
                     file_type = os.path.splitext(item["name"])[1].lstrip('.')
                 date = datetime.fromtimestamp(item['date']).strftime('%Y-%m-%d %H:%M') if item['date'] else ''
                 new_url = generate_new_url(item["path"], item['type'], sort_order)
-                self.wfile.write(
-                    f'<tr><td><a href="{new_url}">{item["name"]}</a></td><td>{file_type}</td><td>{size}</td><td>{date}</td></tr>'.encode())
+                page_content += f'<tr><td><a href="{new_url}">{item["name"]}</a></td><td>{file_type}</td><td>{size}</td><td>{date}</td></tr>'
 
-            self.wfile.write(f'</table>{FOOTER}</body></html>'.encode())
+            page_content += f'</table>{FOOTER}</body></html>'
+            self.send_header('Content-Length', str(len(page_content.encode())))
+            self.end_headers()
+            if self.suppress_body:
+                return
+            self.wfile.write(page_content.encode())
+
         except (BrokenPipeError, ConnectionResetError) as e:
             ftp.close()
             self.send_response(500)
             self.send_header('Content-type', 'text/plain')
+            page_content = 'Error: {}'.format(str(e))
+            self.send_header('Content-Length', str(len(page_content.encode())))
             self.end_headers()
-            self.wfile.write('Error: {}'.format(str(e)).encode())
+            if self.suppress_body:
+                return
+            self.wfile.write(page_content.encode())
             return
 
     def handle_file_request(self, ftp, path):
+        def callback(ftp_data):
+            try:
+                self.wfile.write(ftp_data)
+            except (BrokenPipeError, ConnectionResetError, AttributeError):
+                ftp.close()
+
         # Check if the requested file exists on the FTP server
         try:
             filesize = ftp.size(path)
@@ -401,12 +413,6 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
 
             if not self.suppress_body:
-                def callback(ftp_data):
-                    try:
-                        self.wfile.write(ftp_data)
-                    except (BrokenPipeError, ConnectionResetError):
-                        ftp.close()
-
                 ftp.retrbinary(f'RETR {path}', callback, rest=start)
             return
 
@@ -428,13 +434,8 @@ class FTPProxyHandler(http.server.BaseHTTPRequestHandler):
         self.send_header('Content-Length', filesize)  # Send the size of the file
         self.end_headers()
 
-        def callback(ftp_data):
-            try:
-                self.wfile.write(ftp_data)
-            except (BrokenPipeError, ConnectionResetError):
-                ftp.close()
-
-        ftp.retrbinary(f'RETR {path}', callback, rest=0)
+        if not self.suppress_body:
+            ftp.retrbinary(f'RETR {path}', callback)
 
 
 def format_size(size):
@@ -469,9 +470,30 @@ def path_to_html_links(path: str) -> str:
 
 
 def main():
-    with ThreadedTCPServer(('', PORT), FTPProxyHandler) as httpd:
-        print("Server started on port", PORT)
-        httpd.serve_forever()
+    retry_message = f"Port {PORT} is already in use. Retrying"
+    first_try = True
+    while True:
+        try:
+            with ThreadedTCPServer(('', PORT), FTPProxyHandler) as httpd:
+                if first_try:
+                    print("Server started on port", PORT)
+                else:
+                    print("\nServer started on port", PORT)
+                httpd.serve_forever()
+                httpd.shutdown()
+                break
+        except OSError as e:
+            if e.errno == 98: # Port already in use
+                first_try = False
+                print(retry_message + '.', end='\r')
+                retry_message += '.'
+                time.sleep(1)
+            else:
+                raise
+        except KeyboardInterrupt:
+            print("Shutting down server...")
+            break
+    print("Server shut down.")
 
 
 if __name__ == "__main__":
